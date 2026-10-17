@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type Fantome = { nom: string; mensuel: number; annuel: number; fois: number; dernier: string; aVerifier: boolean };
-type Resultat = { actifs: Fantome[]; arretes: number };
+type Resultat = { actifs: Fantome[]; arretes: Fantome[] };
 
 function lire(texte: string): string[][] {
   const t = texte.replace(/^\uFEFF/, "");
@@ -106,7 +106,7 @@ function analyser(texte: string): Resultat | string {
     groupes.set(cle, g);
   }
   const actifs: Fantome[] = [];
-  let arretes = 0;
+  const arretes: (Fantome & { ts: number })[] = [];
   groupes.forEach((g) => {
     if (g.t.length < 3) return;
     const ts = [...g.t].sort((a, b) => a - b);
@@ -118,20 +118,20 @@ function analyser(texte: string): Resultat | string {
     const proches = g.m.filter((x) => Math.abs(x - med) <= med * 0.2).length;
     if (proches / g.m.length < 0.7) return;
     const dernier = ts[ts.length - 1];
-    if ((derniereDate - dernier) / 86400000 > 45) {
-      arretes++;
-      return;
-    }
-    actifs.push({
+    const f = {
       nom: g.nom,
       mensuel: med,
       annuel: med * 12,
       fois: g.t.length,
       dernier: new Date(dernier).toLocaleDateString("fr-FR"),
       aVerifier: g.t.length <= 4,
-    });
+      ts: dernier,
+    };
+    if ((derniereDate - dernier) / 86400000 > 60) arretes.push(f);
+    else actifs.push(f);
   });
   actifs.sort((a, b) => b.annuel - a.annuel);
+  arretes.sort((a, b) => b.ts - a.ts);
   return { actifs, arretes };
 }
 
@@ -163,7 +163,7 @@ Dans l’attente de votre confirmation, je vous prie d’agréer, Madame, Monsie
 ${nom || "[Ton nom et prénom]"}`;
 }
 
-const CLE = "fantomes_resultat";
+const CLE = "fantomes_resultat_v2";
 
 export default function Audit() {
   const [res, setRes] = useState<Resultat | null>(null);
@@ -243,6 +243,7 @@ export default function Audit() {
   }
 
   const liste = res ? res.actifs : [];
+  const arretes = res ? res.arretes : [];
   const gardes = liste.filter((x) => !exclus.includes(x.nom));
   const total = (paye ? gardes : liste).reduce((s, x) => s + x.annuel, 0);
   const champ = { width: "100%", minHeight: "2.75rem", padding: "0 .75rem", background: "#ffffff0d", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", fontSize: "1rem", marginBottom: ".5rem" } as const;
@@ -261,6 +262,7 @@ export default function Audit() {
         Choisir mon fichier
         <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={choisir} style={{ display: "none" }} />
       </label>
+      <p className="note">Seuls les prélèvements réussis apparaissent ici. Un abonnement payé à la main, par virement ou depuis un autre compte n’est pas visible.</p>
       {erreur && <p className="note" style={{ color: "var(--brique)", opacity: 1 }}>{erreur}</p>}
 
       {res && liste.length === 0 && (
@@ -271,11 +273,6 @@ export default function Audit() {
         <section style={{ marginTop: "1.5rem" }}>
           <div className="chiffre">{eur(total)}</div>
           <p>par an, pour {paye ? gardes.length : liste.length} prélèvement{(paye ? gardes.length : liste.length) > 1 ? "s" : ""} en cours.</p>
-          {res.arretes > 0 && (
-            <p style={{ opacity: 0.6, fontSize: ".9rem" }}>
-              {res.arretes} abonnement{res.arretes > 1 ? "s" : ""} déjà arrêté{res.arretes > 1 ? "s" : ""}, non compté{res.arretes > 1 ? "s" : ""}.
-            </p>
-          )}
 
           <ul style={{ listStyle: "none", margin: "1.5rem 0 0", padding: 0, display: "grid", gap: "1rem" }}>
             {visibles.map((x) => {
@@ -351,6 +348,25 @@ export default function Audit() {
               <p className="note">Paiement unique, sans abonnement. Satisfait ou remboursé 14 jours, sur simple email à madameanash111@gmail.com.</p>
             </div>
           )}
+        </section>
+      )}
+
+      {res && arretes.length > 0 && (
+        <section style={{ marginTop: "2rem" }}>
+          <h2 className="titre" style={{ fontSize: "1.3rem", margin: "0 0 .25rem", color: "var(--caramel)" }}>Arrêtés récemment</h2>
+          <p style={{ opacity: 0.7, fontSize: ".9rem", margin: "0 0 1rem" }}>
+            Plus de prélèvement depuis plus de 60 jours : résilié, refusé ou payé autrement. Non compté dans le total.
+          </p>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: ".75rem" }}>
+            {arretes.map((x) => (
+              <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: ".75rem" }}>
+                <div style={{ fontWeight: 700 }}>{x.nom}</div>
+                <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
+                  {eur(x.mensuel)} par mois · dernier prélèvement : {x.dernier}
+                </div>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </main>
