@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type Fantome = { nom: string; mensuel: number; annuel: number; fois: number; dernier: string; aVerifier: boolean };
@@ -163,6 +163,8 @@ Dans l’attente de votre confirmation, je vous prie d’agréer, Madame, Monsie
 ${nom || "[Ton nom et prénom]"}`;
 }
 
+const CLE = "fantomes_resultat";
+
 export default function Audit() {
   const [res, setRes] = useState<Resultat | null>(null);
   const [erreur, setErreur] = useState("");
@@ -172,6 +174,20 @@ export default function Audit() {
   const [adresse, setAdresse] = useState("");
   const [ref, setRef] = useState("");
   const [copie, setCopie] = useState(false);
+  const [paye, setPaye] = useState(false);
+  const [attente, setAttente] = useState(false);
+  const [erreurPaiement, setErreurPaiement] = useState("");
+
+  useEffect(() => {
+    try {
+      const s = sessionStorage.getItem(CLE);
+      if (s) setRes(JSON.parse(s));
+    } catch {}
+    fetch("/api/acces", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setPaye(!!d.paye))
+      .catch(() => setPaye(false));
+  }, []);
 
   function choisir(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -185,13 +201,31 @@ export default function Audit() {
       try {
         const r = analyser(String(lecteur.result || ""));
         if (typeof r === "string") setErreur(r);
-        else setRes(r);
+        else {
+          setRes(r);
+          try { sessionStorage.setItem(CLE, JSON.stringify(r)); } catch {}
+        }
       } catch {
         setErreur("Impossible de lire ce fichier.");
       }
     };
     lecteur.onerror = () => setErreur("Impossible de lire ce fichier.");
     lecteur.readAsText(f);
+  }
+
+  async function debloquer() {
+    setAttente(true);
+    setErreurPaiement("");
+    try {
+      const rep = await fetch("/api/checkout", { method: "POST" });
+      const data = await rep.json();
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch {}
+    setErreurPaiement("Le paiement est indisponible pour le moment. Réessaie dans un instant.");
+    setAttente(false);
   }
 
   function basculer(n: string) {
@@ -208,10 +242,15 @@ export default function Audit() {
     }
   }
 
-  const gardes = res ? res.actifs.filter((x) => !exclus.includes(x.nom)) : [];
-  const total = gardes.reduce((s, x) => s + x.annuel, 0);
+  const liste = res ? res.actifs : [];
+  const gardes = liste.filter((x) => !exclus.includes(x.nom));
+  const total = (paye ? gardes : liste).reduce((s, x) => s + x.annuel, 0);
   const champ = { width: "100%", minHeight: "2.75rem", padding: "0 .75rem", background: "#ffffff0d", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", fontSize: "1rem", marginBottom: ".5rem" } as const;
   const bouton = { marginTop: ".5rem", minHeight: "2.75rem", padding: "0 1rem", background: "transparent", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", cursor: "pointer", fontSize: ".9rem" } as const;
+  const montantStyle = { color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem" } as const;
+
+  const visibles = paye ? liste : liste.slice(0, 1);
+  const verrouilles = paye ? [] : liste.slice(1);
 
   return (
     <main className="wrap" style={{ padding: "2.5rem 1.25rem 3rem" }}>
@@ -224,30 +263,29 @@ export default function Audit() {
       </label>
       {erreur && <p className="note" style={{ color: "var(--brique)", opacity: 1 }}>{erreur}</p>}
 
-      {res && res.actifs.length === 0 && (
+      {res && liste.length === 0 && (
         <p style={{ marginTop: "1.5rem" }}>Aucun prélèvement régulier en cours trouvé. Essaie un relevé sur 12 mois.</p>
       )}
 
-      {res && res.actifs.length > 0 && (
+      {res && liste.length > 0 && (
         <section style={{ marginTop: "1.5rem" }}>
           <div className="chiffre">{eur(total)}</div>
-          <p>par an, pour {gardes.length} prélèvement{gardes.length > 1 ? "s" : ""} en cours.</p>
+          <p>par an, pour {paye ? gardes.length : liste.length} prélèvement{(paye ? gardes.length : liste.length) > 1 ? "s" : ""} en cours.</p>
           {res.arretes > 0 && (
             <p style={{ opacity: 0.6, fontSize: ".9rem" }}>
               {res.arretes} abonnement{res.arretes > 1 ? "s" : ""} déjà arrêté{res.arretes > 1 ? "s" : ""}, non compté{res.arretes > 1 ? "s" : ""}.
             </p>
           )}
+
           <ul style={{ listStyle: "none", margin: "1.5rem 0 0", padding: 0, display: "grid", gap: "1rem" }}>
-            {res.actifs.map((x) => {
+            {visibles.map((x) => {
               const out = exclus.includes(x.nom);
               const ouv = ouvert === x.nom;
               return (
                 <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem" }}>
                   <div style={{ opacity: out ? 0.4 : 1 }}>
                     <div style={{ fontWeight: 700 }}>{x.nom}</div>
-                    <div style={{ color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem", textDecoration: out ? "line-through" : "none" }}>
-                      {eur(x.annuel)} par an
-                    </div>
+                    <div style={{ ...montantStyle, textDecoration: out ? "line-through" : "none" }}>{eur(x.annuel)} par an</div>
                     <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
                       {eur(x.mensuel)} par mois · vu {x.fois} fois · dernier : {x.dernier}
                     </div>
@@ -257,34 +295,62 @@ export default function Audit() {
                       </div>
                     )}
                   </div>
-                  <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
-                    {!out && (
-                      <button type="button" onClick={() => setOuvert(ouv ? null : x.nom)} style={{ ...bouton, background: "var(--caramel)", color: "var(--noir)", border: 0, fontWeight: 700 }}>
-                        {ouv ? "Fermer la lettre" : "Écrire la lettre"}
-                      </button>
-                    )}
-                    <button type="button" onClick={() => basculer(x.nom)} style={bouton}>
-                      {out ? "Remettre dans la liste" : "Ce n’est pas un abonnement"}
-                    </button>
-                  </div>
-                  {ouv && !out && (
-                    <div style={{ marginTop: "1rem" }}>
-                      <input style={champ} placeholder="Ton nom et prénom" value={nom} onChange={(e) => setNom(e.target.value)} />
-                      <input style={champ} placeholder="Ton adresse postale" value={adresse} onChange={(e) => setAdresse(e.target.value)} />
-                      <input style={champ} placeholder="Référence client (si tu l’as)" value={ref} onChange={(e) => setRef(e.target.value)} />
-                      <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: ".95rem", background: "#ffffff0d", padding: "1rem", borderRadius: ".5rem", margin: ".5rem 0" }}>
-                        {lettre(x, nom, adresse, ref)}
-                      </pre>
-                      <button type="button" onClick={() => copier(lettre(x, nom, adresse, ref))} className="btn" style={{ border: 0, cursor: "pointer" }}>
-                        {copie ? "Lettre copiée" : "Copier la lettre"}
-                      </button>
-                      <p className="note">Envoie-la par courrier recommandé ou par l’espace client du service.</p>
-                    </div>
+                  {paye ? (
+                    <>
+                      <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+                        {!out && (
+                          <button type="button" onClick={() => setOuvert(ouv ? null : x.nom)} style={{ ...bouton, background: "var(--caramel)", color: "var(--noir)", border: 0, fontWeight: 700 }}>
+                            {ouv ? "Fermer la lettre" : "Écrire la lettre"}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => basculer(x.nom)} style={bouton}>
+                          {out ? "Remettre dans la liste" : "Ce n’est pas un abonnement"}
+                        </button>
+                      </div>
+                      {ouv && !out && (
+                        <div style={{ marginTop: "1rem" }}>
+                          <input style={champ} placeholder="Ton nom et prénom" value={nom} onChange={(e) => setNom(e.target.value)} />
+                          <input style={champ} placeholder="Ton adresse postale" value={adresse} onChange={(e) => setAdresse(e.target.value)} />
+                          <input style={champ} placeholder="Référence client (si tu l’as)" value={ref} onChange={(e) => setRef(e.target.value)} />
+                          <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: ".95rem", background: "#ffffff0d", padding: "1rem", borderRadius: ".5rem", margin: ".5rem 0" }}>
+                            {lettre(x, nom, adresse, ref)}
+                          </pre>
+                          <button type="button" onClick={() => copier(lettre(x, nom, adresse, ref))} className="btn" style={{ border: 0, cursor: "pointer" }}>
+                            {copie ? "Lettre copiée" : "Copier la lettre"}
+                          </button>
+                          <p className="note">Envoie-la par courrier recommandé ou par l’espace client du service.</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ opacity: 0.6, fontSize: ".9rem", marginTop: ".5rem" }}>Lettre de résiliation : débloque l’audit complet pour l’écrire.</p>
                   )}
                 </li>
               );
             })}
+
+            {verrouilles.map((x) => (
+              <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem" }} aria-hidden="true">
+                <div style={{ fontWeight: 700, opacity: 0.5 }}>•••••••••• ••••••</div>
+                <div style={{ ...montantStyle, opacity: 0.35 }}>••• € par an</div>
+              </li>
+            ))}
           </ul>
+
+          {!paye && (
+            <div style={{ marginTop: "2rem", border: "1px solid var(--caramel)", borderRadius: ".75rem", padding: "1.25rem" }}>
+              <h2 className="titre" style={{ fontSize: "1.4rem", margin: "0 0 .5rem" }}>Voilà ton audit, prêt.</h2>
+              <p style={{ margin: "0 0 1rem" }}>
+                Tu paies {eur(total)} par an en prélèvements réguliers. Pour 19 € une fois, tu vois chaque ligne
+                {verrouilles.length > 0 ? ` (${verrouilles.length} de plus)` : ""} et tu as la lettre de résiliation de chacune, prête à envoyer.
+              </p>
+              <button type="button" className="btn" onClick={debloquer} disabled={attente} style={{ border: 0, cursor: "pointer" }}>
+                {attente ? "Ouverture du paiement…" : "Débloquer pour 19 €"}
+              </button>
+              {erreurPaiement && <p className="note" style={{ color: "var(--brique)", opacity: 1 }}>{erreurPaiement}</p>}
+              <p className="note">Paiement unique, sans abonnement. Satisfait ou remboursé 14 jours, sur simple email à madameanash111@gmail.com.</p>
+            </div>
+          )}
         </section>
       )}
     </main>
