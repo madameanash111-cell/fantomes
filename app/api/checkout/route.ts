@@ -25,7 +25,7 @@ export async function POST(req: Request) {
           },
         },
       ],
-      success_url: `${origin}/merci`,
+      success_url: `${origin}/api/acces?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/paiement-echoue`,
     });
     return NextResponse.json({ url: session.url });
