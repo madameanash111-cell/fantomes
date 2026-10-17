@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 
-type Fantome = { nom: string; mensuel: number; annuel: number; fois: number; dernier: string };
+type Fantome = { nom: string; mensuel: number; annuel: number; fois: number; dernier: string; aVerifier: boolean };
+type Resultat = { actifs: Fantome[]; arretes: number };
 
 function lire(texte: string): string[][] {
   const t = texte.replace(/^\uFEFF/, "");
@@ -72,7 +73,7 @@ function nettoyer(desc: string): string {
     .slice(0, 30);
 }
 
-function analyser(texte: string): Fantome[] | string {
+function analyser(texte: string): Resultat | string {
   const rows = lire(texte);
   if (rows.length < 2) return "Le fichier semble vide.";
   const h = rows[0];
@@ -85,10 +86,12 @@ function analyser(texte: string): Fantome[] | string {
     return "Je ne reconnais pas les colonnes. Il faut au moins Description, Montant et Date.";
   }
   const groupes = new Map<string, { nom: string; t: number[]; m: number[] }>();
+  let derniereDate = 0;
   for (const r of rows.slice(1)) {
+    const t = date(r[iDate] || "");
+    if (!isNaN(t) && t > derniereDate) derniereDate = t;
     const desc = (r[iDesc] || "").trim();
     const montant = parseFloat((r[iMont] || "").replace(",", "."));
-    const t = date(r[iDate] || "");
     if (!desc || isNaN(montant) || isNaN(t) || montant >= 0) continue;
     const etat = (r[iEtat] || "").toLowerCase();
     if (iEtat >= 0 && !/termin|complet/.test(etat)) continue;
@@ -102,7 +105,8 @@ function analyser(texte: string): Fantome[] | string {
     g.m.push(Math.abs(montant));
     groupes.set(cle, g);
   }
-  const res: Fantome[] = [];
+  const actifs: Fantome[] = [];
+  let arretes = 0;
   groupes.forEach((g) => {
     if (g.t.length < 3) return;
     const ts = [...g.t].sort((a, b) => a - b);
@@ -113,35 +117,44 @@ function analyser(texte: string): Fantome[] | string {
     const med = mediane(g.m);
     const proches = g.m.filter((x) => Math.abs(x - med) <= med * 0.2).length;
     if (proches / g.m.length < 0.7) return;
-    res.push({
+    const dernier = ts[ts.length - 1];
+    if ((derniereDate - dernier) / 86400000 > 45) {
+      arretes++;
+      return;
+    }
+    actifs.push({
       nom: g.nom,
       mensuel: med,
       annuel: med * 12,
       fois: g.t.length,
-      dernier: new Date(ts[ts.length - 1]).toLocaleDateString("fr-FR"),
+      dernier: new Date(dernier).toLocaleDateString("fr-FR"),
+      aVerifier: g.t.length <= 4,
     });
   });
-  return res.sort((a, b) => b.annuel - a.annuel);
+  actifs.sort((a, b) => b.annuel - a.annuel);
+  return { actifs, arretes };
 }
 
 const eur = (n: number) =>
   n.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
 
 export default function Audit() {
-  const [liste, setListe] = useState<Fantome[] | null>(null);
+  const [res, setRes] = useState<Resultat | null>(null);
   const [erreur, setErreur] = useState("");
+  const [exclus, setExclus] = useState<string[]>([]);
 
   function choisir(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
     setErreur("");
-    setListe(null);
+    setRes(null);
+    setExclus([]);
     const lecteur = new FileReader();
     lecteur.onload = () => {
       try {
         const r = analyser(String(lecteur.result || ""));
         if (typeof r === "string") setErreur(r);
-        else setListe(r);
+        else setRes(r);
       } catch {
         setErreur("Impossible de lire ce fichier.");
       }
@@ -150,7 +163,12 @@ export default function Audit() {
     lecteur.readAsText(f);
   }
 
-  const total = liste ? liste.reduce((s, x) => s + x.annuel, 0) : 0;
+  function basculer(nom: string) {
+    setExclus((x) => (x.includes(nom) ? x.filter((n) => n !== nom) : [...x, nom]));
+  }
+
+  const gardes = res ? res.actifs.filter((x) => !exclus.includes(x.nom)) : [];
+  const total = gardes.reduce((s, x) => s + x.annuel, 0);
 
   return (
     <main className="wrap" style={{ padding: "2.5rem 1.25rem 3rem" }}>
@@ -163,26 +181,46 @@ export default function Audit() {
       </label>
       {erreur && <p className="note" style={{ color: "var(--brique)", opacity: 1 }}>{erreur}</p>}
 
-      {liste && liste.length === 0 && (
-        <p style={{ marginTop: "1.5rem" }}>Aucun prélèvement régulier trouvé. Essaie un relevé sur 12 mois.</p>
+      {res && res.actifs.length === 0 && (
+        <p style={{ marginTop: "1.5rem" }}>Aucun prélèvement régulier en cours trouvé. Essaie un relevé sur 12 mois.</p>
       )}
 
-      {liste && liste.length > 0 && (
+      {res && res.actifs.length > 0 && (
         <section style={{ marginTop: "1.5rem" }}>
           <div className="chiffre">{eur(total)}</div>
-          <p>par an, pour {liste.length} prélèvement{liste.length > 1 ? "s" : ""} régulier{liste.length > 1 ? "s" : ""}.</p>
+          <p>par an, pour {gardes.length} prélèvement{gardes.length > 1 ? "s" : ""} en cours.</p>
+          {res.arretes > 0 && (
+            <p style={{ opacity: 0.6, fontSize: ".9rem" }}>
+              {res.arretes} abonnement{res.arretes > 1 ? "s" : ""} déjà arrêté{res.arretes > 1 ? "s" : ""}, non compté{res.arretes > 1 ? "s" : ""}.
+            </p>
+          )}
           <ul style={{ listStyle: "none", margin: "1.5rem 0 0", padding: 0, display: "grid", gap: "1rem" }}>
-            {liste.map((x) => (
-              <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem" }}>
-                <div style={{ fontWeight: 700 }}>{x.nom}</div>
-                <div style={{ color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem" }}>
-                  {eur(x.annuel)} par an
-                </div>
-                <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
-                  {eur(x.mensuel)} par mois · vu {x.fois} fois · dernier : {x.dernier}
-                </div>
-              </li>
-            ))}
+            {res.actifs.map((x) => {
+              const out = exclus.includes(x.nom);
+              return (
+                <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem", opacity: out ? 0.4 : 1 }}>
+                  <div style={{ fontWeight: 700 }}>{x.nom}</div>
+                  <div style={{ color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem", textDecoration: out ? "line-through" : "none" }}>
+                    {eur(x.annuel)} par an
+                  </div>
+                  <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
+                    {eur(x.mensuel)} par mois · vu {x.fois} fois · dernier : {x.dernier}
+                  </div>
+                  {x.aVerifier && !out && (
+                    <div style={{ color: "var(--caramel)", fontSize: ".9rem", marginTop: ".25rem" }}>
+                      À vérifier : vu peu de fois, peut-être un paiement en plusieurs fois.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => basculer(x.nom)}
+                    style={{ marginTop: ".5rem", minHeight: "2.75rem", padding: "0 1rem", background: "transparent", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", cursor: "pointer", fontSize: ".9rem" }}
+                  >
+                    {out ? "Remettre dans la liste" : "Ce n’est pas un abonnement"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
