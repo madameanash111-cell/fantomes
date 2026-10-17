@@ -138,10 +138,40 @@ function analyser(texte: string): Resultat | string {
 const eur = (n: number) =>
   n.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
 
+function lettre(x: Fantome, nom: string, adresse: string, ref: string): string {
+  const aujourdhui = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  return `${nom || "[Ton nom et prénom]"}
+${adresse || "[Ton adresse postale]"}
+
+${x.nom}
+Service résiliation
+
+Le ${aujourdhui}
+
+Objet : résiliation de mon abonnement${ref ? ` (référence : ${ref})` : ""}
+
+Madame, Monsieur,
+
+Par la présente, je vous informe de ma décision de résilier l’abonnement que j’ai souscrit auprès de vos services${ref ? `, référence client ${ref}` : ""}. Il donne lieu à un prélèvement mensuel d’environ ${eur(x.mensuel)}.
+
+Je vous demande de prendre en compte cette résiliation à la date de réception de ce courrier, ou à l’échéance prévue par mon contrat, et de cesser tout prélèvement à compter de cette date.
+
+Je vous remercie de bien vouloir me confirmer la résiliation par écrit, en précisant la date de fin effective de l’abonnement.
+
+Dans l’attente de votre confirmation, je vous prie d’agréer, Madame, Monsieur, l’expression de mes salutations distinguées.
+
+${nom || "[Ton nom et prénom]"}`;
+}
+
 export default function Audit() {
   const [res, setRes] = useState<Resultat | null>(null);
   const [erreur, setErreur] = useState("");
   const [exclus, setExclus] = useState<string[]>([]);
+  const [ouvert, setOuvert] = useState<string | null>(null);
+  const [nom, setNom] = useState("");
+  const [adresse, setAdresse] = useState("");
+  const [ref, setRef] = useState("");
+  const [copie, setCopie] = useState(false);
 
   function choisir(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -149,6 +179,7 @@ export default function Audit() {
     setErreur("");
     setRes(null);
     setExclus([]);
+    setOuvert(null);
     const lecteur = new FileReader();
     lecteur.onload = () => {
       try {
@@ -163,12 +194,24 @@ export default function Audit() {
     lecteur.readAsText(f);
   }
 
-  function basculer(nom: string) {
-    setExclus((x) => (x.includes(nom) ? x.filter((n) => n !== nom) : [...x, nom]));
+  function basculer(n: string) {
+    setExclus((x) => (x.includes(n) ? x.filter((v) => v !== n) : [...x, n]));
+  }
+
+  async function copier(texte: string) {
+    try {
+      await navigator.clipboard.writeText(texte);
+      setCopie(true);
+      setTimeout(() => setCopie(false), 2000);
+    } catch {
+      setCopie(false);
+    }
   }
 
   const gardes = res ? res.actifs.filter((x) => !exclus.includes(x.nom)) : [];
   const total = gardes.reduce((s, x) => s + x.annuel, 0);
+  const champ = { width: "100%", minHeight: "2.75rem", padding: "0 .75rem", background: "#ffffff0d", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", fontSize: "1rem", marginBottom: ".5rem" } as const;
+  const bouton = { marginTop: ".5rem", minHeight: "2.75rem", padding: "0 1rem", background: "transparent", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", cursor: "pointer", fontSize: ".9rem" } as const;
 
   return (
     <main className="wrap" style={{ padding: "2.5rem 1.25rem 3rem" }}>
@@ -197,27 +240,47 @@ export default function Audit() {
           <ul style={{ listStyle: "none", margin: "1.5rem 0 0", padding: 0, display: "grid", gap: "1rem" }}>
             {res.actifs.map((x) => {
               const out = exclus.includes(x.nom);
+              const ouv = ouvert === x.nom;
               return (
-                <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem", opacity: out ? 0.4 : 1 }}>
-                  <div style={{ fontWeight: 700 }}>{x.nom}</div>
-                  <div style={{ color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem", textDecoration: out ? "line-through" : "none" }}>
-                    {eur(x.annuel)} par an
+                <li key={x.nom} style={{ borderTop: "1px solid #ffffff1f", paddingTop: "1rem" }}>
+                  <div style={{ opacity: out ? 0.4 : 1 }}>
+                    <div style={{ fontWeight: 700 }}>{x.nom}</div>
+                    <div style={{ color: "var(--brique)", fontFamily: "var(--font-titre), Georgia, serif", fontWeight: 800, fontSize: "1.6rem", textDecoration: out ? "line-through" : "none" }}>
+                      {eur(x.annuel)} par an
+                    </div>
+                    <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
+                      {eur(x.mensuel)} par mois · vu {x.fois} fois · dernier : {x.dernier}
+                    </div>
+                    {x.aVerifier && !out && (
+                      <div style={{ color: "var(--caramel)", fontSize: ".9rem", marginTop: ".25rem" }}>
+                        À vérifier : vu peu de fois, peut-être un paiement en plusieurs fois.
+                      </div>
+                    )}
                   </div>
-                  <div style={{ opacity: 0.7, fontSize: ".9rem" }}>
-                    {eur(x.mensuel)} par mois · vu {x.fois} fois · dernier : {x.dernier}
+                  <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
+                    {!out && (
+                      <button type="button" onClick={() => setOuvert(ouv ? null : x.nom)} style={{ ...bouton, background: "var(--caramel)", color: "var(--noir)", border: 0, fontWeight: 700 }}>
+                        {ouv ? "Fermer la lettre" : "Écrire la lettre"}
+                      </button>
+                    )}
+                    <button type="button" onClick={() => basculer(x.nom)} style={bouton}>
+                      {out ? "Remettre dans la liste" : "Ce n’est pas un abonnement"}
+                    </button>
                   </div>
-                  {x.aVerifier && !out && (
-                    <div style={{ color: "var(--caramel)", fontSize: ".9rem", marginTop: ".25rem" }}>
-                      À vérifier : vu peu de fois, peut-être un paiement en plusieurs fois.
+                  {ouv && !out && (
+                    <div style={{ marginTop: "1rem" }}>
+                      <input style={champ} placeholder="Ton nom et prénom" value={nom} onChange={(e) => setNom(e.target.value)} />
+                      <input style={champ} placeholder="Ton adresse postale" value={adresse} onChange={(e) => setAdresse(e.target.value)} />
+                      <input style={champ} placeholder="Référence client (si tu l’as)" value={ref} onChange={(e) => setRef(e.target.value)} />
+                      <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: ".95rem", background: "#ffffff0d", padding: "1rem", borderRadius: ".5rem", margin: ".5rem 0" }}>
+                        {lettre(x, nom, adresse, ref)}
+                      </pre>
+                      <button type="button" onClick={() => copier(lettre(x, nom, adresse, ref))} className="btn" style={{ border: 0, cursor: "pointer" }}>
+                        {copie ? "Lettre copiée" : "Copier la lettre"}
+                      </button>
+                      <p className="note">Envoie-la par courrier recommandé ou par l’espace client du service.</p>
                     </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => basculer(x.nom)}
-                    style={{ marginTop: ".5rem", minHeight: "2.75rem", padding: "0 1rem", background: "transparent", color: "var(--creme)", border: "1px solid #ffffff40", borderRadius: ".5rem", cursor: "pointer", fontSize: ".9rem" }}
-                  >
-                    {out ? "Remettre dans la liste" : "Ce n’est pas un abonnement"}
-                  </button>
                 </li>
               );
             })}
