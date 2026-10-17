@@ -1,0 +1,40 @@
+:root {
+  --noir: #14110f;
+  --creme: #f4efe6;
+  --caramel: #c49a6c;
+  --brique: #c8452d;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--noir);
+  color: var(--creme);
+  font-family: var(--font-texte), system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+.wrap { max-width: 34rem; margin: 0 auto; padding: 0 1.25rem; }
+.titre { font-family: var(--font-titre), Georgia, serif; font-weight: 800; line-height: 1.08; letter-spacing: -0.01em; }
+.hero { padding: 2.5rem 0 2rem; }
+.marque { display: flex; align-items: center; gap: .5rem; font-family: var(--font-titre), Georgia, serif; font-weight: 800; font-size: 1.25rem; color: var(--caramel); }
+.hero h1 { font-size: 2.4rem; margin: 1.75rem 0 1rem; }
+.hero p { margin: 0 0 1.5rem; opacity: .85; }
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 3.5rem; padding: 0 1.5rem;
+  background: var(--caramel); color: var(--noir);
+  font-weight: 700; font-size: 1.125rem; text-decoration: none;
+  border-radius: .75rem;
+}
+.btn:active { transform: scale(.98); }
+.note { text-align: center; font-size: .9rem; opacity: .6; margin-top: .75rem; }
+.douleur { border-top: 1px solid #ffffff1f; border-bottom: 1px solid #ffffff1f; padding: 2rem 0; margin: 1rem 0 2rem; }
+.chiffre { font-family: var(--font-titre), Georgia, serif; font-weight: 800; font-size: 3.25rem; color: var(--brique); font-variant-numeric: tabular-nums; line-height: 1; }
+.douleur p { margin: .5rem 0 0; opacity: .85; }
+.benefices { list-style: none; margin: 0 0 2.5rem; padding: 0; display: grid; gap: 1.5rem; }
+.benefices h2 { font-family: var(--font-titre), Georgia, serif; font-size: 1.3rem; margin: 0 0 .25rem; color: var(--caramel); }
+.benefices p { margin: 0; opacity: .85; }
+.final { padding-bottom: 2.5rem; }
+.pied { border-top: 1px solid #ffffff1f; padding: 1.5rem 0 2.5rem; font-size: .9rem; opacity: .7; }
+.pied a { color: var(--creme); display: inline-block; padding: .4rem 0; margin-right: 1rem; }
